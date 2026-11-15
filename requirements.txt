@@ -1,7 +1,2 @@
-# Discord Video Compressor
-# Standard library is used for core GUI and compression.
-# Zero required external dependencies!
-
-# Optional (enables drag-and-drop video files into the window):
+# Native file dragging (into the app and out to Discord)
 tkinterdnd2>=0.3.0
-

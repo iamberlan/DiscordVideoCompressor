@@ -176,7 +176,7 @@ def calculate_bitrates(
     if duration_sec <= 0:
         duration_sec = 1.0
 
-    target_bytes = target_size_mb * 1024 * 1024 * safety_margin
+    target_bytes = target_size_mb * 1_000_000 * safety_margin
     total_bits = target_bytes * 8
     total_bitrate_bps = total_bits / duration_sec
 
@@ -202,7 +202,7 @@ def calculate_bitrates(
     total_kbps = video_kbps + audio_kbps
 
     estimated_bytes = (total_kbps * 1000 * duration_sec) / 8
-    estimated_mb = estimated_bytes / (1024 * 1024)
+    estimated_mb = estimated_bytes / 1_000_000
 
     return {
         "target_size_mb": target_size_mb,
@@ -237,6 +237,15 @@ def get_recommended_scale(video_bitrate_kbps: int, original_height: int) -> Opti
     return target
 
 
+def unique_output_path(path: str) -> str:
+    candidate = Path(path)
+    count = 1
+    while candidate.exists():
+        candidate = Path(path).with_name(f"{Path(path).stem} ({count}){Path(path).suffix}")
+        count += 1
+    return str(candidate)
+
+
 class VideoCompressor:
     """
     Handles two-pass FFmpeg compression with real-time progress callbacks,
@@ -263,7 +272,54 @@ class VideoCompressor:
         with self._lock:
             return self._cancelled
 
-    def compress(
+    def compress(self, input_path, output_path, target_size_mb, preset="medium",
+                 resolution_mode="Auto", keep_audio=True, safety_margin=0.96,
+                 progress_callback=None, log_callback=None):
+        """Encode privately, retry oversized results, and publish without overwriting."""
+        if not math.isfinite(target_size_mb) or target_size_mb <= 0:
+            raise ValueError("Choose a valid size greater than zero.")
+        if os.path.normcase(os.path.abspath(input_path)) == os.path.normcase(os.path.abspath(output_path)):
+            raise ValueError("Choose a different output file.")
+        self._cancelled = False
+        directory = os.path.dirname(os.path.abspath(output_path))
+        os.makedirs(directory, exist_ok=True)
+        limit = target_size_mb * 1_000_000
+        margin = safety_margin
+        with tempfile.TemporaryDirectory(prefix=".dvc_", dir=directory) as temporary:
+            staging = os.path.join(temporary, "video.mp4")
+            for attempt in range(3):
+                if self.is_cancelled:
+                    raise RuntimeError("Compression cancelled.")
+                if attempt and log_callback:
+                    log_callback("Adjusting size and retrying...")
+                result = self._compress_once(
+                    input_path, staging, target_size_mb, preset, resolution_mode,
+                    keep_audio, margin, progress_callback, log_callback)
+                if self.is_cancelled:
+                    raise RuntimeError("Compression cancelled.")
+                if result["compressed_size"] <= limit:
+                    # Exclusive creation also handles a file appearing during encoding.
+                    destination = unique_output_path(output_path)
+                    while True:
+                        try:
+                            with open(destination, "xb") as output:
+                                try:
+                                    with open(staging, "rb") as source:
+                                        shutil.copyfileobj(source, output)
+                                except BaseException:
+                                    output.close()
+                                    os.remove(destination)
+                                    raise
+                            break
+                        except FileExistsError:
+                            destination = unique_output_path(destination)
+                    result["output_file"] = destination
+                    result["under_target"] = True
+                    return result
+                margin *= (limit / result["compressed_size"]) * 0.90
+            raise ValueError("Cannot fit this video. Try a larger size or a shorter clip.")
+
+    def _compress_once(
         self,
         input_path: str,
         output_path: str,
@@ -288,7 +344,6 @@ class VideoCompressor:
             eta_seconds: float
             status: str
         """
-        self._cancelled = False
         ffmpeg_bin = get_ffmpeg_path()
         if not ffmpeg_bin:
             raise RuntimeError("FFmpeg executable not found. Please configure FFmpeg path.")
@@ -459,7 +514,7 @@ class VideoCompressor:
             "reduction_percent": round(reduction, 1),
             "elapsed_seconds": round(elapsed, 1),
             "elapsed_str": format_seconds(elapsed),
-            "under_target": output_size <= (target_size_mb * 1024 * 1024)
+            "under_target": output_size <= (target_size_mb * 1_000_000)
         }
 
         emit_log(
@@ -534,7 +589,7 @@ class VideoCompressor:
                     elif key == "out_time_ms":
                         try:
                             ms = int(val)
-                            current_sec = ms / 1_000.0
+                            current_sec = ms / 1_000_000.0
                         except ValueError:
                             pass
                     elif key == "speed":

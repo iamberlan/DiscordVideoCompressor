@@ -3,6 +3,7 @@ app.py - Modern Tkinter GUI for Discord Video Compressor.
 """
 
 import os
+import math
 import sys
 import threading
 import subprocess
@@ -12,7 +13,7 @@ from tkinter import ttk, filedialog, messagebox
 from typing import Optional, Dict, Any
 
 try:
-    from tkinterdnd2 import DND_FILES, TkinterDnD
+    from tkinterdnd2 import COPY, DND_FILES, TkinterDnD
     HAS_DND = True
     BaseTk = TkinterDnD.Tk
 except ImportError:
@@ -20,6 +21,7 @@ except ImportError:
     BaseTk = tk.Tk
 
 from compressor import (
+    unique_output_path,
     VideoCompressor,
     get_video_info,
     calculate_bitrates,
@@ -27,6 +29,7 @@ from compressor import (
     format_seconds,
     get_recommended_scale
 )
+from file_clipboard import copy_file
 import ffmpeg_finder
 
 
@@ -57,19 +60,21 @@ class DiscordVideoCompressorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Discord Video Compressor")
-        self.root.geometry("780x880")
-        self.root.minsize(700, 750)
+        self.root.geometry("780x650")
+        self.root.minsize(700, 600)
         self.root.configure(bg=COLORS["bg"])
 
         self.compressor = VideoCompressor()
         self.is_compressing = False
+        self.result_path = None
+        self.custom_output = False
         self.video_info: Optional[Dict[str, Any]] = None
 
         # State Variables
         self.input_file_var = tk.StringVar()
         self.output_file_var = tk.StringVar()
-        self.preset_var = tk.StringVar(value="8")  # "8", "20", "50", "custom"
-        self.custom_size_var = tk.StringVar(value="8")
+        self.preset_var = tk.StringVar(value="20")
+        self.custom_size_var = tk.StringVar(value="20")
         self.speed_var = tk.StringVar(value="medium")
         self.resolution_var = tk.StringVar(value="Auto")
         self.audio_var = tk.StringVar(value="keep")
@@ -104,8 +109,9 @@ class DiscordVideoCompressorApp:
             "Primary.TButton",
             background=COLORS["accent"],
             foreground="#ffffff",
-            font=(FONT_FAMILY, 11, "bold"),
-            padding=(16, 10),
+            font=(FONT_FAMILY, 10, "bold"),
+            padding=(12, 8),
+            width=11,
             borderwidth=0
         )
         self.style.map("Primary.TButton",
@@ -116,6 +122,7 @@ class DiscordVideoCompressorApp:
         # Danger Button (Cancel)
         self.style.configure(
             "Danger.TButton",
+            width=11,
             background=COLORS["danger"],
             foreground="#ffffff",
             font=(FONT_FAMILY, 10, "bold"),
@@ -139,6 +146,11 @@ class DiscordVideoCompressorApp:
         self.style.map("Secondary.TButton",
             background=[("active", COLORS["card_border"])]
         )
+
+        self.style.configure("Action.TButton", font=(FONT_FAMILY, 10, "bold"),
+                             padding=(12, 8), width=11, borderwidth=0,
+                             background=COLORS["input_bg"], foreground=COLORS["text"])
+        self.style.map("Action.TButton", background=[("active", COLORS["card_border"])])
 
         # Radio & Checkbutton
         self.style.configure(
@@ -180,8 +192,16 @@ class DiscordVideoCompressorApp:
 
     def create_widgets(self):
         # Main scrollable canvas container to ensure it works on any screen size
-        container = ttk.Frame(self.root)
-        container.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
+        viewport = tk.Canvas(self.root, bg=COLORS["bg"], highlightthickness=0)
+        scroll = ttk.Scrollbar(self.root, orient="vertical", command=viewport.yview)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        viewport.pack(fill=tk.BOTH, expand=True)
+        viewport.configure(yscrollcommand=scroll.set)
+        container = ttk.Frame(viewport, padding=(20, 16))
+        content = viewport.create_window((0, 0), window=container, anchor="nw")
+        container.bind("<Configure>", lambda event: viewport.configure(scrollregion=viewport.bbox("all")))
+        viewport.bind("<Configure>", lambda event: viewport.itemconfigure(content, width=event.width))
+        self.root.bind("<MouseWheel>", lambda event: viewport.yview_scroll(-int(event.delta / 120), "units"))
 
         # Header Bar
         header_frame = ttk.Frame(container)
@@ -195,7 +215,7 @@ class DiscordVideoCompressorApp:
 
         subtitle = ttk.Label(
             title_box,
-            text="Compress videos with 2-pass FFmpeg to fit Discord upload limits without quality waste",
+            text="",
             foreground=COLORS["text_muted"],
             font=(FONT_FAMILY, 9)
         )
@@ -230,7 +250,7 @@ class DiscordVideoCompressorApp:
         input_card = ttk.Frame(container, style="Card.TFrame", padding=14)
         input_card.pack(fill=tk.X, pady=(0, 12))
 
-        lbl_s1 = ttk.Label(input_card, text="1. Select Video File", style="Section.TLabel")
+        lbl_s1 = ttk.Label(input_card, text="1. Video", style="Section.TLabel")
         lbl_s1.pack(anchor="w", pady=(0, 8))
 
         file_row = ttk.Frame(input_card, style="Card.TFrame")
@@ -279,7 +299,7 @@ class DiscordVideoCompressorApp:
         preset_card = ttk.Frame(container, style="Card.TFrame", padding=14)
         preset_card.pack(fill=tk.X, pady=(0, 12))
 
-        lbl_s2 = ttk.Label(preset_card, text="2. Choose Target File Size Preset", style="Section.TLabel")
+        lbl_s2 = ttk.Label(preset_card, text="2. Size", style="Section.TLabel")
         lbl_s2.pack(anchor="w", pady=(0, 8))
 
         preset_row = ttk.Frame(preset_card, style="Card.TFrame")
@@ -287,8 +307,8 @@ class DiscordVideoCompressorApp:
 
         r_8 = ttk.Radiobutton(
             preset_row,
-            text="8 MB (Free Discord limit)",
-            value="8",
+            text="20 MB · Free",
+            value="20",
             variable=self.preset_var,
             command=self.on_preset_changed
         )
@@ -296,8 +316,8 @@ class DiscordVideoCompressorApp:
 
         r_20 = ttk.Radiobutton(
             preset_row,
-            text="20 MB",
-            value="20",
+            text="50 MB · Basic",
+            value="50",
             variable=self.preset_var,
             command=self.on_preset_changed
         )
@@ -305,8 +325,8 @@ class DiscordVideoCompressorApp:
 
         r_50 = ttk.Radiobutton(
             preset_row,
-            text="50 MB (Nitro Basic)",
-            value="50",
+            text="1 GB · Nitro",
+            value="1000",
             variable=self.preset_var,
             command=self.on_preset_changed
         )
@@ -314,7 +334,7 @@ class DiscordVideoCompressorApp:
 
         r_custom = ttk.Radiobutton(
             preset_row,
-            text="Custom Target:",
+            text="Custom",
             value="custom",
             variable=self.preset_var,
             command=self.on_preset_changed
@@ -333,14 +353,28 @@ class DiscordVideoCompressorApp:
             state="disabled"
         )
         self.entry_custom_size.pack(side=tk.LEFT, ipady=3, padx=(0, 4))
-        self.custom_size_var.trace_add("write", lambda *args: self.update_bitrate_preview())
+        self.custom_size_var.trace_add("write", lambda *args: self.on_custom_size_changed())
 
         lbl_mb = ttk.Label(preset_row, text="MB", style="Card.TLabel")
         lbl_mb.pack(side=tk.LEFT)
 
+        # -------------------------------------------------------------
+        # Section 3: Compression Settings (Options)
+        # -------------------------------------------------------------
+        opts_card = ttk.Frame(container, style="Card.TFrame", padding=14)
+        self.opts_card = opts_card
+        self.btn_advanced = ttk.Button(container, text="Advanced", command=self.toggle_advanced)
+        self.btn_advanced.pack(anchor="w", pady=(0, 8))
+
+        lbl_s3 = ttk.Label(opts_card, text="Options", style="Section.TLabel")
+        lbl_s3.pack(anchor="w", pady=(0, 8))
+
+        opts_row = ttk.Frame(opts_card, style="Card.TFrame")
+        opts_row.pack(fill=tk.X)
+
         # Dynamic Bitrate Preview Box
-        self.preview_box = ttk.Frame(preset_card, style="Card.TFrame")
-        self.preview_box.pack(fill=tk.X, pady=(6, 0))
+        self.preview_box = ttk.Frame(opts_card, style="Card.TFrame")
+
 
         self.lbl_preview = ttk.Label(
             self.preview_box,
@@ -351,17 +385,7 @@ class DiscordVideoCompressorApp:
         )
         self.lbl_preview.pack(anchor="w")
 
-        # -------------------------------------------------------------
-        # Section 3: Compression Settings (Options)
-        # -------------------------------------------------------------
-        opts_card = ttk.Frame(container, style="Card.TFrame", padding=14)
-        opts_card.pack(fill=tk.X, pady=(0, 12))
-
-        lbl_s3 = ttk.Label(opts_card, text="3. Encoding Options", style="Section.TLabel")
-        lbl_s3.pack(anchor="w", pady=(0, 8))
-
-        opts_row = ttk.Frame(opts_card, style="Card.TFrame")
-        opts_row.pack(fill=tk.X)
+        self.preview_box.pack(fill=tk.X, pady=(6, 0))
 
         # Resolution Option
         lbl_res = ttk.Label(opts_row, text="Resolution:", style="Muted.TLabel")
@@ -407,7 +431,7 @@ class DiscordVideoCompressorApp:
         out_card = ttk.Frame(container, style="Card.TFrame", padding=14)
         out_card.pack(fill=tk.X, pady=(0, 12))
 
-        lbl_s4 = ttk.Label(out_card, text="4. Output Destination", style="Section.TLabel")
+        lbl_s4 = ttk.Label(out_card, text="Save beside original", style="Section.TLabel")
         lbl_s4.pack(anchor="w", pady=(0, 8))
 
         out_row = ttk.Frame(out_card, style="Card.TFrame")
@@ -422,11 +446,12 @@ class DiscordVideoCompressorApp:
             font=(FONT_FAMILY, 10),
             relief="flat"
         )
+        self.entry_output.config(state="readonly")
         self.entry_output.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6, padx=(0, 8))
 
         btn_browse_out = ttk.Button(
             out_row,
-            text="Change...",
+            text="Change location",
             style="Secondary.TButton",
             command=self.browse_output_file
         )
@@ -443,7 +468,7 @@ class DiscordVideoCompressorApp:
 
         self.btn_compress = ttk.Button(
             btn_row,
-            text="⚡ Compress Video",
+            text="Compress",
             style="Primary.TButton",
             command=self.start_compression
         )
@@ -462,16 +487,9 @@ class DiscordVideoCompressorApp:
         self.btn_open_folder = ttk.Button(
             btn_row,
             text="Open Folder",
-            style="Secondary.TButton",
+            style="Action.TButton",
             command=self.open_output_folder
         )
-        self.btn_play_video = ttk.Button(
-            btn_row,
-            text="Play Video",
-            style="Secondary.TButton",
-            command=self.play_output_video
-        )
-
         # Progress bar
         self.progress_bar = ttk.Progressbar(
             action_card,
@@ -500,33 +518,34 @@ class DiscordVideoCompressorApp:
         )
         self.lbl_eta.pack(side=tk.RIGHT)
 
-        # Result Banner
-        self.lbl_result = tk.Label(
-            action_card,
-            text="",
-            font=(FONT_FAMILY, 10, "bold"),
-            bg=COLORS["card"],
-            fg=COLORS["success"],
-            wraplength=700,
-            justify="left"
-        )
-        self.lbl_result.pack(anchor="w", pady=(6, 0))
+        # Completed video: click to open, drag to share.
+        self.lbl_result = ttk.Button(btn_row, text="▶ Video", style="Action.TButton", cursor="hand2")
+        self.btn_copy = ttk.Button(btn_row, text="Copy", style="Action.TButton", command=self.copy_result)
+        self.result_press = None
+        self.result_dragging = False
+        self.lbl_result.bind("<ButtonPress-1>", self.press_result, add="+")
+        self.lbl_result.bind("<ButtonRelease-1>", self.release_result, add="+")
+        self.lbl_result.bind("<Return>", lambda event: self.play_output_video())
+        self.lbl_result.bind("<space>", lambda event: self.play_output_video())
+        if HAS_DND:
+            self.lbl_result.drag_source_register(1, DND_FILES)
+            self.lbl_result.dnd_bind("<<DragInitCmd>>", self.drag_result)
 
         # -------------------------------------------------------------
         # Section 6: Collapsible FFmpeg Log Drawer
         # -------------------------------------------------------------
         log_header = ttk.Frame(container)
-        log_header.pack(fill=tk.X, pady=(4, 4))
+        log_header.pack(in_=opts_card, fill=tk.X, pady=(4, 4))
 
         self.btn_toggle_logs = ttk.Button(
             log_header,
-            text="▶ Show FFmpeg Logs",
+            text="Show details",
             style="Secondary.TButton",
             command=self.toggle_logs
         )
         self.btn_toggle_logs.pack(side=tk.LEFT)
 
-        self.log_container = ttk.Frame(container)
+        self.log_container = ttk.Frame(opts_card)
 
         self.log_text = tk.Text(
             self.log_container,
@@ -554,14 +573,14 @@ class DiscordVideoCompressorApp:
             version_str = ffmpeg_finder.get_ffmpeg_version(ffmpeg_bin) or "Detected"
             short_ver = version_str.split("Copyright")[0].strip() if "Copyright" in version_str else version_str[:25]
             self.ffmpeg_status_lbl.config(
-                text=f"✓ FFmpeg Ready ({short_ver})",
+                text="Ready",
                 fg=COLORS["success"],
                 bg=COLORS["input_bg"]
             )
             self.btn_locate_ffmpeg.pack_forget()
         else:
             self.ffmpeg_status_lbl.config(
-                text="⚠ FFmpeg not found on PATH",
+                text="Setup needed",
                 fg=COLORS["warning"],
                 bg=COLORS["input_bg"]
             )
@@ -583,12 +602,35 @@ class DiscordVideoCompressorApp:
 
     def on_drop_file(self, event):
         """Handles Drag and Drop files."""
-        path = event.data.strip()
-        # On Windows, path may be enclosed in curly braces if it has spaces
-        if path.startswith("{") and path.endswith("}"):
-            path = path[1:-1]
-        if os.path.exists(path):
-            self.set_input_file(path)
+        if self.is_compressing:
+            return
+        paths = self.root.tk.splitlist(event.data)
+        if len(paths) == 1 and os.path.isfile(paths[0]):
+            self.set_input_file(paths[0])
+
+    def toggle_advanced(self):
+        if self.opts_card.winfo_manager():
+            self.opts_card.pack_forget()
+        else:
+            self.opts_card.pack(fill=tk.X, before=self.btn_advanced, pady=(0, 8))
+
+    def press_result(self, event):
+        self.result_press = (event.x_root, event.y_root)
+        self.result_dragging = False
+        self.lbl_result.focus_set()
+
+    def release_result(self, event):
+        if self.result_press and not self.result_dragging:
+            x, y = self.result_press
+            if abs(event.x_root - x) < 5 and abs(event.y_root - y) < 5:
+                self.play_output_video()
+        self.result_press = None
+
+    def drag_result(self, event):
+        if self.result_path and os.path.isfile(self.result_path) and not self.is_compressing:
+            self.result_dragging = True
+            return (COPY, DND_FILES, (os.path.abspath(self.result_path),))
+        return "break"
 
     def browse_input_file(self):
         file_path = filedialog.askopenfilename(
@@ -602,6 +644,15 @@ class DiscordVideoCompressorApp:
             self.set_input_file(file_path)
 
     def set_input_file(self, path: str):
+        if self.is_compressing:
+            return
+        self.custom_output = False
+        self.video_info = None
+        self.result_path = None
+        self.lbl_result.config(text="")
+        self.btn_open_folder.pack_forget()
+        self.lbl_result.pack_forget()
+        self.btn_copy.pack_forget()
         self.input_file_var.set(path)
         self.lbl_status.config(text="Analyzing video...", foreground=COLORS["accent"])
         self.root.update_idletasks()
@@ -611,21 +662,16 @@ class DiscordVideoCompressorApp:
     def _analyze_video_worker(self, path: str):
         try:
             info = get_video_info(path)
-            self.video_info = info
-            self.root.after(0, self._on_video_analyzed, info)
+            self.root.after(0, self._on_video_analyzed, info, path)
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("Analysis Error", f"Failed to analyze video:\n{e}"))
+            self.root.after(0, lambda err=str(e): messagebox.showerror("Cannot open video", err))
             self.root.after(0, lambda: self.lbl_status.config(text="Ready to compress", foreground=COLORS["text"]))
 
-    def _on_video_analyzed(self, info: Dict[str, Any]):
-        audio_str = f"{info['audio_codec'].upper()}" if info['has_audio'] else "None (Muted)"
-        fps_str = f" @ {info['fps']} fps" if info['fps'] > 0 else ""
-        details = (
-            f"File: {info['filename']}\n"
-            f"Size: {info['filesize_str']}  |  Duration: {info['duration_str']}  |  "
-            f"Resolution: {info['resolution_str']}{fps_str}  |  "
-            f"Video: {info['video_codec']}  |  Audio: {audio_str}"
-        )
+    def _on_video_analyzed(self, info: Dict[str, Any], path=None):
+        if path and path != self.input_file_var.get():
+            return
+        self.video_info = info
+        details = f"{info['filename']} · {info['filesize_str']} · {info['duration_str']}"
         self.lbl_info_details.config(text=details, style="Card.TLabel")
         self.lbl_status.config(text="Video loaded successfully.", foreground=COLORS["text"])
 
@@ -635,13 +681,18 @@ class DiscordVideoCompressorApp:
 
     def get_selected_target_mb(self) -> float:
         choice = self.preset_var.get()
-        if choice in ("8", "20", "50"):
+        if choice in ("20", "50", "1000"):
             return float(choice)
         try:
             val = float(self.custom_size_var.get().strip())
-            return max(0.1, val)
+            return val if math.isfinite(val) and val > 0 else 0
         except ValueError:
-            return 8.0
+            return 0.0
+
+    def on_custom_size_changed(self):
+        if hasattr(self, "lbl_preview"):
+            self.update_default_output_path()
+            self.update_bitrate_preview()
 
     def on_preset_changed(self):
         choice = self.preset_var.get()
@@ -656,7 +707,7 @@ class DiscordVideoCompressorApp:
 
     def update_default_output_path(self):
         in_path = self.input_file_var.get().strip()
-        if not in_path:
+        if not in_path or self.custom_output:
             return
 
         target_mb = self.get_selected_target_mb()
@@ -693,6 +744,13 @@ class DiscordVideoCompressorApp:
 
         aud_str = f"{a_kbps} kbps" if keep_aud else "Muted"
 
+        if self.video_info["filesize"] <= target_mb * 1_000_000:
+            self.lbl_status.config(text="Already fits", foreground=COLORS["success"])
+        elif v_kbps < 500:
+            self.lbl_status.config(text="Low quality: try a larger size or shorter clip", foreground=COLORS["warning"])
+        else:
+            self.lbl_status.config(text="Ready", foreground=COLORS["text"])
+
         # Warning if bitrate is very low
         warn_str = ""
         if v_kbps < 150:
@@ -720,16 +778,17 @@ class DiscordVideoCompressorApp:
             filetypes=[("MP4 Video", "*.mp4"), ("All Files", "*.*")]
         )
         if file_path:
+            self.custom_output = True
             self.output_file_var.set(file_path)
 
     def toggle_logs(self):
         if self.show_logs_var.get():
             self.log_container.pack_forget()
-            self.btn_toggle_logs.config(text="▶ Show FFmpeg Logs")
+            self.btn_toggle_logs.config(text="Show details")
             self.show_logs_var.set(False)
         else:
             self.log_container.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
-            self.btn_toggle_logs.config(text="▼ Hide FFmpeg Logs")
+            self.btn_toggle_logs.config(text="Hide details")
             self.show_logs_var.set(True)
 
     def append_log(self, text: str):
@@ -742,6 +801,8 @@ class DiscordVideoCompressorApp:
     # Compression Execution & Threading
     # -------------------------------------------------------------
     def start_compression(self):
+        if self.is_compressing:
+            return
         input_path = self.input_file_var.get().strip()
         if not input_path or not os.path.exists(input_path):
             messagebox.showerror("Missing File", "Please select an existing input video file.")
@@ -768,15 +829,20 @@ class DiscordVideoCompressorApp:
             messagebox.showerror("Invalid Size", "Target file size must be greater than 0 MB.")
             return
 
+        output_path = unique_output_path(output_path)
+        self.output_file_var.set(output_path)
+
         # UI state during compression
         self.is_compressing = True
+        self.result_path = None
         self.btn_compress.config(state="disabled")
         self.btn_cancel.config(state="normal")
         self.btn_open_folder.pack_forget()
-        self.btn_play_video.pack_forget()
+        self.lbl_result.pack_forget()
+        self.btn_copy.pack_forget()
         self.lbl_result.config(text="")
         self.progress_bar["value"] = 0
-        self.lbl_status.config(text="Initializing FFmpeg 2-Pass encoder...", foreground=COLORS["accent"])
+        self.lbl_status.config(text="Preparing video...", foreground=COLORS["accent"])
         self.lbl_eta.config(text="")
         self.log_text.delete("1.0", tk.END)
 
@@ -794,7 +860,7 @@ class DiscordVideoCompressorApp:
 
     def cancel_compression(self):
         if self.is_compressing:
-            self.lbl_status.config(text="Cancelling encoding...", foreground=COLORS["danger"])
+            self.lbl_status.config(text="Cancelling...", foreground=COLORS["danger"])
             self.compressor.cancel()
 
     def _compress_worker(
@@ -818,10 +884,7 @@ class DiscordVideoCompressorApp:
                 eta_str = f"ETA: {format_seconds(eta_s)}" if eta_s > 0 else ""
                 speed_str = f"Speed: {speed}" if speed else ""
 
-                status_msg = f"Pass {pass_num}/2: {'Analyzing' if pass_num == 1 else 'Encoding'} ({pass_pct:.0f}%)"
-                if speed_str:
-                    status_msg += f"  [{speed_str}]"
-
+                status_msg = "Analyzing video..." if pass_num == 1 else "Compressing video..."
                 self.lbl_status.config(text=status_msg, foreground=COLORS["text"])
                 self.lbl_eta.config(text=eta_str)
             self.root.after(0, _update)
@@ -849,34 +912,25 @@ class DiscordVideoCompressorApp:
         self.progress_bar["value"] = 100
         self.lbl_eta.config(text="")
 
+        self.result_path = res["output_file"]
         out_size_str = res["compressed_size_str"]
         orig_size_str = res["original_size_str"]
         reduction = res["reduction_percent"]
         elapsed = res["elapsed_str"]
         under_target = res["under_target"]
 
-        if under_target:
-            status_text = f"✓ Compression Complete in {elapsed}!"
-            color = COLORS["success"]
-            summary = (
-                f"🎉 Ready for Discord!\n"
-                f"Original: {orig_size_str}  →  Compressed: {out_size_str} ({reduction}% reduction)\n"
-                f"Saved to: {res['output_file']}"
-            )
-        else:
-            status_text = f"Compression finished in {elapsed} (slightly over target)"
-            color = COLORS["warning"]
-            summary = (
-                f"Original: {orig_size_str}  →  Compressed: {out_size_str} ({reduction}% reduction)\n"
-                f"Saved to: {res['output_file']}"
-            )
-
+        status_text = "Ready to share" if under_target else "Over size limit"
+        color = COLORS["success"] if under_target else COLORS["warning"]
         self.lbl_status.config(text=status_text, foreground=color)
-        self.lbl_result.config(text=summary, fg=color)
+        self.lbl_result.config(text="▶ Video", cursor="hand2")
+        self.lbl_result.pack(side=tk.RIGHT, padx=(10, 0))
+        if os.name == "nt":
+            self.btn_copy.config(text="Copy")
+            self.btn_copy.pack(side=tk.RIGHT, padx=(10, 0))
 
         # Show action buttons
         self.btn_open_folder.pack(side=tk.LEFT, padx=(10, 0))
-        self.btn_play_video.pack(side=tk.LEFT, padx=(10, 0))
+
 
     def _on_compression_error(self, err_msg: str):
         self.is_compressing = False
@@ -889,11 +943,20 @@ class DiscordVideoCompressorApp:
             self.progress_bar["value"] = 0
         else:
             self.lbl_status.config(text="Compression failed.", foreground=COLORS["danger"])
-            self.lbl_result.config(text=f"Error: {err_msg}", fg=COLORS["danger"])
+            self.lbl_result.config(text="▶ Video")
             messagebox.showerror("Compression Error", f"Video compression failed:\n\n{err_msg}")
 
+    def copy_result(self):
+        if not self.result_path or self.is_compressing:
+            return
+        try:
+            copy_file(self.result_path, self.root.winfo_id())
+            self.btn_copy.config(text="Copied")
+        except OSError as error:
+            messagebox.showerror("Cannot copy video", str(error))
+
     def open_output_folder(self):
-        out_path = self.output_file_var.get().strip()
+        out_path = self.result_path
         if out_path and os.path.exists(out_path):
             folder = os.path.dirname(os.path.abspath(out_path))
             if os.name == "nt":
@@ -904,8 +967,8 @@ class DiscordVideoCompressorApp:
                 subprocess.Popen(["xdg-open", folder])
 
     def play_output_video(self):
-        out_path = self.output_file_var.get().strip()
-        if out_path and os.path.exists(out_path):
+        out_path = self.result_path
+        if not self.is_compressing and out_path and os.path.isfile(out_path):
             if os.name == "nt":
                 os.startfile(out_path)
             elif sys.platform == "darwin":

@@ -12,11 +12,11 @@ A modern, responsive Tkinter desktop application that compresses videos using 2-
 ## ✨ Features
 
 - **🎯 Exact Target Size Presets:**
-  - **8 MB** — Free Discord tier upload limit
-  - **20 MB** — Boosted server / legacy upload limit
-  - **50 MB** — Discord Nitro Basic upload limit
+  - **20 MB** — Free Discord
+  - **50 MB** — Discord Basic
+  - **1 GB** — Discord Nitro
   - **Custom Target** — Any desired size in MB (e.g., `10`, `25`, `100`)
-- **⚖️ 2-Pass FFmpeg Encoding:** Guarantees precise target size without overshooting the Discord limit while maximizing video fidelity.
+- **⚖️ 2-Pass FFmpeg Encoding:** Checks the finished size and retries oversized results up to twice.
 - **🛡️ Built-in Safety Margin (4%):** Files are encoded to ~96% of the exact limit (e.g. 7.68 MB for 8 MB) to prevent Discord from rejecting uploads due to container metadata overhead.
 - **📐 Intelligent Auto-Resolution Scaling:** Automatically downscales high-resolution videos (1080p/4K) if the calculated bitrate is too low, preventing muddy, macroblocked videos.
 - **🔊 Smart Audio Allocation:** Dynamic audio bitrate (48 kbps – 128 kbps) based on target size, with an option to mute/strip audio to give 100% of the bits to video.
@@ -53,7 +53,7 @@ A modern, responsive Tkinter desktop application that compresses videos using 2-
    ```bash
    pip install -r requirements.txt
    ```
-   > *Note: External dependencies are optional. The app runs completely on Python's standard library!*
+   > *Note: External dependencies are optional. Install requirements for dragging videos into the app and finished files into Discord.*
 
 3. **Launch the application:**
    - **Using Bash (Git Bash / WSL / macOS / Linux):**
@@ -71,11 +71,21 @@ A modern, responsive Tkinter desktop application that compresses videos using 2-
 
 ---
 
+## Using the app
+
+1. Drop or browse for a video.
+2. Choose 20 MB, 50 MB, 1 GB, or Custom.
+3. Compress, then click Video to open it, drag Video into Discord, or use Copy and paste (Windows).
+
+Files save beside the original unless you choose another location. Existing files are preserved with numbered filenames. Advanced contains resolution, audio, speed, bitrate details, and logs. Low quality targets show a warning; files that already fit are identified. Dragging requires `tkinterdnd2`; Open Folder remains available without it.
+
+Upload targets use decimal MB (1 GB = 1,000 MB). Size is checked before the finished file is published. If three attempts cannot fit, choose a larger target or shorten the clip.
+
 ## 🛠️ How It Works (Bitrate Calculation)
 
 The application calculates the exact mathematical target bitrates required to fit into the specified size:
 
-$$\text{Effective Target Bytes} = \text{Target MB} \times 1024 \times 1024 \times 0.96$$
+$$\text{Effective Target Bytes} = \text{Target MB} \times 1{,}000{,}000 \times 0.96$$
 
 $$\text{Total Bitrate (bps)} = \frac{\text{Effective Target Bytes} \times 8}{\text{Video Duration in Seconds}}$$
 
