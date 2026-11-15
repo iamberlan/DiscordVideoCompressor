@@ -15,6 +15,7 @@ htmlcov/
 /build/
 /dist/
 /*.spec
+/vendor/ffmpeg/*.exe
 
 # Local app configuration and diagnostics
 /config.json

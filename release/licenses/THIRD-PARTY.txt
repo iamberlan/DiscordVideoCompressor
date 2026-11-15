@@ -1,0 +1,19 @@
+This distribution includes Python (PSF license), Tcl/Tk (Tcl/Tk license),
+tkinterdnd2/tkdnd (see included licenses), and FFmpeg as separate executables.
+PyInstaller's bootloader uses its GPL license with the bundling exception.
+The application's MIT statement does not replace these dependency licenses.
+
+FFmpeg binaries supplied by Gyan Doshi:
+https://www.gyan.dev/ffmpeg/builds/
+Version: 2026-11-11-git-23c4540053-full_build
+License: GNU GPL version 3 or later. No warranty.
+Exact FFmpeg source revision (download using Code > Download ZIP):
+https://github.com/FFmpeg/FFmpeg/tree/23c4540053
+Source archive:
+https://github.com/FFmpeg/FFmpeg/archive/23c4540053.tar.gz
+Build information is recorded in FFmpeg-README.txt.
+External library and build information:
+https://www.gyan.dev/ffmpeg/builds/#libraries
+
+When replacing the vendored binaries, update this version and source information
+to match the new binaries before distributing another release.

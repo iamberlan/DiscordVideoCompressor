@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import json
+import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -60,6 +61,12 @@ def find_binary(binary_name: str) -> Optional[str]:
     2. Check system PATH
     3. Check current folder and standard local paths
     """
+    # A portable release must not depend on another FFmpeg installation.
+    if getattr(sys, "frozen", False):
+        bundled = Path(__file__).resolve().parent / "bin" / f"{binary_name}.exe"
+        if bundled.is_file() and _test_binary(str(bundled)):
+            return str(bundled)
+
     config = load_config()
     custom_path = config.get(f"{binary_name}_path")
     if custom_path and os.path.exists(custom_path) and _test_binary(custom_path):

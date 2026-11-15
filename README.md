@@ -1,116 +1,111 @@
-# Discord Video Compressor 🎬
+﻿# Discord Video Compressor
 
-A modern, responsive Tkinter desktop application that compresses videos using 2-pass **FFmpeg** encoding to precisely hit Discord file size upload limits without sacrificing more quality than necessary.
-
-![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
-![FFmpeg](https://img.shields.io/badge/FFmpeg-Required-green.svg)
-![GUI](https://img.shields.io/badge/GUI-Tkinter-purple.svg)
-![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
-
----
-
-## ✨ Features
-
-- **🎯 Exact Target Size Presets:**
-  - **20 MB** — Free Discord
-  - **50 MB** — Discord Basic
-  - **1 GB** — Discord Nitro
-  - **Custom Target** — Any desired size in MB (e.g., `10`, `25`, `100`)
-- **⚖️ 2-Pass FFmpeg Encoding:** Checks the finished size and retries oversized results up to twice.
-- **🛡️ Built-in Safety Margin (4%):** Files are encoded to ~96% of the exact limit (e.g. 7.68 MB for 8 MB) to prevent Discord from rejecting uploads due to container metadata overhead.
-- **📐 Intelligent Auto-Resolution Scaling:** Automatically downscales high-resolution videos (1080p/4K) if the calculated bitrate is too low, preventing muddy, macroblocked videos.
-- **🔊 Smart Audio Allocation:** Dynamic audio bitrate (48 kbps – 128 kbps) based on target size, with an option to mute/strip audio to give 100% of the bits to video.
-- **🚀 Web-Optimized (`+faststart`):** Embeds moov atom at the front of the file so videos stream and play instantly in Discord chat.
-- **📊 Real-Time Progress & ETA:** Live dual-stage progress bar (Pass 1 analysis + Pass 2 encoding), encoding speed multiplier (e.g. `2.5x`), and estimated time remaining.
-- **🎨 Sleek Discord-Themed Dark UI:** Clean dark interface with Discord Blurple accenting.
-- **📂 One-Click Actions:** Open output folder or directly play the compressed video upon completion.
-- **📋 Collapsible Log Drawer:** View real-time FFmpeg terminal output for diagnostics.
-- **🔎 Auto FFmpeg Detection & Config:** Automatically detects system FFmpeg or allows selecting a custom executable.
-
----
-
-## 📋 Prerequisites
-
-1. **Python 3.8+** (with Tkinter included by default in standard Python installers).
-2. **FFmpeg** and **FFprobe** (must be on system `PATH` or located via the app's *Locate FFmpeg* button).
-
-### Installing FFmpeg:
-- **Windows:** Download from [gyan.dev/ffmpeg/builds](https://www.gyan.dev/ffmpeg/builds/) (or run `winget install Gyan.FFmpeg` or `choco install ffmpeg`).
-- **macOS:** `brew install ffmpeg`
-- **Linux:** `sudo apt install ffmpeg`
-
----
-
-## 🚀 Quick Start
-
-1. **Clone or download this repository:**
-   ```bash
-   git clone https://github.com/isaac/DiscordVideoCompressor.git
-   cd DiscordVideoCompressor
-   ```
-
-2. *(Optional)* Install drag-and-drop support:
-   ```bash
-   pip install -r requirements.txt
-   ```
-   > *Note: External dependencies are optional. Install requirements for dragging videos into the app and finished files into Discord.*
-
-3. **Launch the application:**
-   - **Using Bash (Git Bash / WSL / macOS / Linux):**
-     ```bash
-     ./run.sh
-     ```
-   - **Using Windows Command Prompt / Double-click:**
-     ```cmd
-     run.bat
-     ```
-   - **Directly with Python:**
-     ```bash
-     python run.py
-     ```
-
----
+A simple desktop app for shrinking videos to a chosen upload size. Videos are processed locally with FFmpeg.
 
 ## Using the app
 
-1. Drop or browse for a video.
-2. Choose 20 MB, 50 MB, 1 GB, or Custom.
-3. Compress, then click Video to open it, drag Video into Discord, or use Copy and paste (Windows).
+1. Drop a video into the window or select **Browse**.
+2. Choose **20 MB · Free**, **50 MB · Basic**, **1 GB · Nitro**, or **Custom**.
+3. Select **Compress**.
+4. Click **Video** to open the result, drag it into Discord, or select **Copy** and paste it into Discord on Windows.
 
-Files save beside the original unless you choose another location. Existing files are preserved with numbered filenames. Advanced contains resolution, audio, speed, bitrate details, and logs. Low quality targets show a warning; files that already fit are identified. Dragging requires `tkinterdnd2`; Open Folder remains available without it.
+**Open Folder** shows the saved file. Files save beside the original unless you choose **Change location**. Existing files are preserved by adding a number to the filename.
 
-Upload targets use decimal MB (1 GB = 1,000 MB). Size is checked before the finished file is published. If three attempts cannot fit, choose a larger target or shorten the clip.
+**Advanced** contains resolution, audio, encoding speed, bitrate details, and logs. The app identifies videos that already fit and warns when the chosen size may produce low quality. It still allows compression when a video already fits.
 
-## 🛠️ How It Works (Bitrate Calculation)
+## Run from source
 
-The application calculates the exact mathematical target bitrates required to fit into the specified size:
+You need Python with Tkinter, plus FFmpeg. FFprobe is recommended for reading video details. The current Windows build has been tested with Python 3.13.
 
-$$\text{Effective Target Bytes} = \text{Target MB} \times 1{,}000{,}000 \times 0.96$$
+Install the drag-and-drop dependency from the project folder:
 
-$$\text{Total Bitrate (bps)} = \frac{\text{Effective Target Bytes} \times 8}{\text{Video Duration in Seconds}}$$
-
-$$\text{Video Bitrate} = \text{Total Bitrate} - \text{Audio Bitrate}$$
-
-- **Pass 1:** Analyzes video motion vectors and complexity without rendering audio (`-an -f null`).
-- **Pass 2:** Allocates bits intelligently to complex frames and writes the final `.mp4` file with `yuv420p` pixel format and `+faststart` flags for universal compatibility across Discord desktop, mobile, and web clients.
-
----
-
-## 📁 Project Structure
-
+```powershell
+python -m pip install -r requirements.txt
 ```
+
+Launch:
+
+```powershell
+python run.py
+```
+
+You can also double-click `run.bat` on Windows or use `bash run.sh` on macOS/Linux. Source launchers may show a terminal; the packaged Windows app does not.
+
+FFmpeg can be on your system PATH or selected with **Locate FFmpeg**. Keep FFprobe beside FFmpeg for automatic detection. The app can also look for Windows binaries in its local `bin/` or `ffmpeg/bin/` folder.
+
+Without `tkinterdnd2`, browsing and compression still work, but dragging files is unavailable. **Copy** transfers the file through the Windows clipboard; it is only available on Windows.
+
+## Build the Windows app
+
+Place the Windows x64 static `ffmpeg.exe` and `ffprobe.exe` in `vendor/ffmpeg/`, along with the download's license as `LICENSE.txt` and its `README.txt`. The binaries are ignored by Git. Keep `release/licenses/` in sync if you update dependencies.
+
+From the project folder:
+
+```powershell
+python -m pip install -r requirements.txt pyinstaller
+.\build.bat
+```
+
+Open the resulting application:
+
+```text
+dist/DiscordVideoCompressor/DiscordVideoCompressor.exe
+```
+
+The build includes Python, drag-and-drop support, FFmpeg and FFprobe, and disables the console window. Share **`dist/DiscordVideoCompressor-Windows-x64.zip`**. Recipients extract the entire ZIP and open `DiscordVideoCompressor.exe`; they do not need Python, FFmpeg, or build tools. Keep `_internal` beside the executable.
+
+The ZIP includes short instructions and dependency license notices.
+
+`build.bat` runs `tools/build_release.py` and regenerates `DiscordVideoCompressor.spec`. Generated build files and executables are ignored by Git.
+
+## Compression behavior
+
+- Two-pass H.264 encoding produces an MP4 with AAC audio when audio is retained.
+- Automatic resolution scaling reduces resolution when the available bitrate is low.
+- Encoding starts with a 4% size buffer. The actual finished size is checked, with up to two retries if it exceeds the target.
+- Files are encoded in a temporary directory and published after they pass the size check. Cancellation and failed attempts clean up temporary output.
+- If three attempts cannot meet the target, the app asks you to choose a larger size or a shorter clip.
+
+Targets use decimal units: **1 MB = 1,000,000 bytes**, and **1 GB = 1,000 MB**. File-size labels currently use binary units, so the displayed size may differ from the target number. The presets are convenient choices; use **Custom** to match the upload limit shown by Discord.
+
+## Project structure
+
+```text
 DiscordVideoCompressor/
-├── app.py              # Modern Tkinter GUI with Discord dark theme & background workers
-├── compressor.py       # Core video analysis, bitrate calculations, and 2-pass FFmpeg engine
-├── ffmpeg_finder.py    # Binary locator, version check, and configuration manager
-├── run.py              # Simple launcher entry point
-├── test_compressor.py  # Unit tests for calculations and presets
-├── requirements.txt    # Optional dependencies
-└── README.md           # Documentation
+├── app.py                  # Tkinter interface, background jobs, and file actions
+├── compressor.py           # Video analysis, two-pass encoding, retries, and safe output
+├── ffmpeg_finder.py        # FFmpeg/FFprobe detection and local configuration
+├── file_clipboard.py       # Windows file clipboard support
+├── run.py                  # Application entry point
+├── run.bat                 # Windows source launcher
+├── run.sh                  # Bash source launcher
+├── build.bat               # Windows GUI build with PyInstaller
+├── requirements.txt        # Native drag-and-drop dependency
+├── test_compressor.py      # Calculation and configuration tests
+├── test_output_safety.py   # Retry, cancellation, and file-preservation tests
+├── .gitignore              # Generated output and local-only files
+├── .gitattributes          # Git text normalization
+└── README.md
 ```
 
----
+Generated or local files, excluded from Git:
 
-## 📄 License
+```text
+build/           # PyInstaller working files
+dist/            # Packaged application
+run.spec         # Generated build configuration
+__pycache__/     # Python bytecode
+config.json      # Locally selected FFmpeg/FFprobe paths
+```
 
-MIT License. Free to use and modify!
+## Checks
+
+```powershell
+python -m unittest -v
+```
+
+The configuration test writes and removes `config.json`; run it in a checkout without configuration you need to keep. Tests cover compression calculations and output safety. Actual drag/drop and clipboard paste into Discord require a manual desktop check.
+
+## License
+
+MIT License.

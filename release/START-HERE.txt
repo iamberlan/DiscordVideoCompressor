@@ -1,0 +1,9 @@
+Discord Video Compressor - Windows x64
+
+1. Extract the entire ZIP to a folder you can write to.
+2. Open DiscordVideoCompressor.exe.
+3. Browse for a video (or drop it into the window), choose a size,
+   then click Compress.
+
+Python and FFmpeg are included. No installation or build is needed.
+Keep the executable and _internal folder together.
